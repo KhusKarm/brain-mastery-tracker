@@ -58,26 +58,50 @@ header .subtitle {
     font-weight: 600;
 }
 
-.btn-download {
-    background: #27ae60;
+.btn-save {
+    background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
     color: white;
+    animation: pulse 2s infinite;
 }
 
-.btn-download:hover:not(:disabled) {
-    background: #229954;
+.btn-save:hover:not(:disabled) {
+    background: linear-gradient(135deg, #229954 0%, #1e8449 100%);
     transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(39, 174, 96, 0.4);
+    box-shadow: 0 5px 15px rgba(39, 174, 96, 0.6);
 }
 
-.btn-upload {
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(39, 174, 96, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(39, 174, 96, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(39, 174, 96, 0);
+    }
+}
+
+.btn-download {
     background: #3498db;
     color: white;
 }
 
-.btn-upload:hover:not(:disabled) {
+.btn-download:hover:not(:disabled) {
     background: #2980b9;
     transform: translateY(-2px);
     box-shadow: 0 5px 15px rgba(52, 152, 219, 0.4);
+}
+
+.btn-upload {
+    background: #f39c12;
+    color: white;
+}
+
+.btn-upload:hover:not(:disabled) {
+    background: #e67e22;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(243, 156, 18, 0.4);
 }
 
 .btn-clear {
@@ -216,6 +240,13 @@ header .subtitle {
     color: #333;
     margin-bottom: 15px;
     font-size: 16px;
+}
+
+.form-section h4 {
+    color: #667eea;
+    margin-top: 20px;
+    margin-bottom: 10px;
+    font-size: 14px;
 }
 
 .form-group {
@@ -451,15 +482,6 @@ footer.footer {
     border-radius: 5px;
     margin-bottom: 15px;
     border-left: 4px solid #28a745;
-}
-
-.error-message {
-    background: #f8d7da;
-    color: #721c24;
-    padding: 12px;
-    border-radius: 5px;
-    margin-bottom: 15px;
-    border-left: 4px solid #dc3545;
 }
 
 /* RESPONSIVE */

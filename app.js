@@ -1,25 +1,115 @@
-// MAIN APPLICATION LOGIC
+// MAIN APPLICATION LOGIC WITH INDEXEDDB AUTO-PERSISTENCE
 let trackerData = {};
 let currentWeek = null;
 let currentDay = null;
+const DB_NAME = 'BrainMasteryTrackerDB';
+const STORE_NAME = 'trackerData';
+let db = null;
+
+// Initialize IndexedDB
+function initializeIndexedDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, 1);
+
+        request.onerror = () => {
+            console.error('IndexedDB initialization failed');
+            reject(request.error);
+        };
+
+        request.onsuccess = () => {
+            db = request.result;
+            console.log('IndexedDB initialized successfully');
+            resolve(db);
+        };
+
+        request.onupgradeneeded = (event) => {
+            db = event.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME);
+            }
+        };
+    });
+}
+
+// Load data from IndexedDB
+function loadFromIndexedDB() {
+    return new Promise((resolve, reject) => {
+        if (!db) {
+            resolve({});
+            return;
+        }
+
+        const transaction = db.transaction([STORE_NAME], 'readonly');
+        const store = transaction.objectStore(STORE_NAME);
+        const request = store.get('allData');
+
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+            const data = request.result ? request.result.data : {};
+            resolve(data);
+        };
+    });
+}
+
+// Save data to IndexedDB
+function saveToIndexedDB(data) {
+    if (!db) {
+        console.warn('IndexedDB not ready yet');
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+        const transaction = db.transaction([STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(STORE_NAME);
+        const request = store.put({ data: data }, 'allData');
+
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+            console.log('Data saved to IndexedDB');
+            updateLastUpdated();
+            resolve();
+        };
+    });
+}
 
 // Initialize app
-document.addEventListener('DOMContentLoaded', function() {
-    initializeApp();
-    setupEventListeners();
-    populateWeekSelector();
+document.addEventListener('DOMContentLoaded', async function() {
+    try {
+        // Initialize IndexedDB
+        await initializeIndexedDB();
+
+        // Load existing data
+        trackerData = await loadFromIndexedDB();
+
+        // If no data exists, initialize empty structure
+        if (Object.keys(trackerData).length === 0) {
+            initializeAppData();
+        }
+
+        setupEventListeners();
+        populateWeekSelector();
+
+        console.log('App initialized successfully');
+    } catch (error) {
+        console.error('Error initializing app:', error);
+        // Fallback to in-memory storage
+        initializeAppData();
+        setupEventListeners();
+        populateWeekSelector();
+    }
 });
 
-// INITIALIZE APP
-function initializeApp() {
-    // Initialize empty data structure for all 12 weeks
+// INITIALIZE APP DATA
+function initializeAppData() {
+    trackerData = {};
     for (let week = 1; week <= 12; week++) {
         trackerData[week] = {};
         for (let day = 1; day <= 7; day++) {
             trackerData[week][day] = {};
         }
     }
-    updateLastUpdated();
+    // Save to IndexedDB
+    saveToIndexedDB(trackerData).catch(e => console.error('Failed to save initial data:', e));
 }
 
 // SETUP EVENT LISTENERS
@@ -76,6 +166,9 @@ function setupEventListeners() {
     // Summary button
     document.getElementById('summaryBtn').addEventListener('click', showWeeklySummary);
 
+    // Save button (new)
+    document.getElementById('saveBtn').addEventListener('click', saveDayData);
+
     // Download button
     document.getElementById('downloadBtn').addEventListener('click', downloadProgress);
 
@@ -87,15 +180,17 @@ function setupEventListeners() {
 
     // Clear button
     document.getElementById('clearBtn').addEventListener('click', function() {
-        if (confirm('Are you sure? This will clear all data in this session.\n\nYou can restore from a downloaded file.')) {
-            initializeApp();
-            currentWeek = null;
-            currentDay = null;
-            document.getElementById('weekSelect').value = '';
-            document.getElementById('daySelect').value = '';
-            document.getElementById('daySelect').disabled = true;
-            document.getElementById('trackingForm').innerHTML = '<p style="text-align: center; color: #999;">Data cleared. Select a week to start over.</p>';
-            alert('All data cleared!');
+        if (confirm('Are you sure? This will clear ALL data.\n\nDownload a backup first!')) {
+            if (confirm('Are you REALLY sure? This cannot be undone without a backup!')) {
+                initializeAppData();
+                currentWeek = null;
+                currentDay = null;
+                document.getElementById('weekSelect').value = '';
+                document.getElementById('daySelect').value = '';
+                document.getElementById('daySelect').disabled = true;
+                document.getElementById('trackingForm').innerHTML = '<p style="text-align: center; color: #999;">Data cleared. Select a week to start over.</p>';
+                alert('✓ All data cleared! You can restore from a backup.');
+            }
         }
     });
 
@@ -121,18 +216,18 @@ function setupEventListeners() {
         }
     });
 
-    // Form data auto-save
+    // Show save button on form change
     document.addEventListener('change', function(e) {
         if (e.target.dataset.field && currentWeek && currentDay) {
-            saveFormField(e.target);
+            document.getElementById('saveBtn').style.display = 'inline-block';
         }
     });
 
-    document.addEventListener('blur', function(e) {
+    document.addEventListener('input', function(e) {
         if (e.target.dataset.field && currentWeek && currentDay) {
-            saveFormField(e.target);
+            document.getElementById('saveBtn').style.display = 'inline-block';
         }
-    }, true);
+    });
 }
 
 // POPULATE WEEK SELECTOR
@@ -169,7 +264,7 @@ function updatePhaseIndicator() {
 
 // UPDATE PROGRESS BAR
 function updateProgressBar() {
-    const totalDays = 12 * 7; // 84 days total
+    const totalDays = 12 * 7;
     const currentDayNumber = (currentWeek - 1) * 7 + currentDay;
     const percentage = (currentDayNumber / totalDays) * 100;
 
@@ -192,21 +287,9 @@ function loadDayForm() {
             valueSpan.textContent = input.value;
         }
     });
-}
 
-// SAVE FORM FIELD
-function saveFormField(field) {
-    const fieldName = field.dataset.field;
-    let value;
-
-    if (field.type === 'checkbox') {
-        value = field.checked;
-    } else {
-        value = field.value;
-    }
-
-    trackerData[currentWeek][currentDay][fieldName] = value;
-    updateLastUpdated();
+    // Hide save button initially
+    document.getElementById('saveBtn').style.display = 'none';
 }
 
 // RESTORE FORM DATA
@@ -222,7 +305,6 @@ function restoreFormData() {
                 field.checked = value;
             } else {
                 field.value = value;
-                // Update range display
                 if (field.type === 'range') {
                     const valueSpan = document.getElementById(field.id + 'Value');
                     if (valueSpan) {
@@ -232,6 +314,48 @@ function restoreFormData() {
             }
         }
     }
+}
+
+// SAVE DAY DATA
+function saveDayData() {
+    // Collect all form data
+    const formFields = document.querySelectorAll('[data-field]');
+    const dayData = {};
+
+    formFields.forEach(field => {
+        const fieldName = field.dataset.field;
+        let value;
+
+        if (field.type === 'checkbox') {
+            value = field.checked;
+        } else {
+            value = field.value;
+        }
+
+        dayData[fieldName] = value;
+    });
+
+    // Update in-memory data
+    trackerData[currentWeek][currentDay] = dayData;
+
+    // Save to IndexedDB
+    saveToIndexedDB(trackerData)
+        .then(() => {
+            // Show success message
+            const saveBtn = document.getElementById('saveBtn');
+            const originalText = saveBtn.textContent;
+            saveBtn.textContent = '✓ Saved!';
+            saveBtn.style.background = '#27ae60';
+
+            setTimeout(() => {
+                saveBtn.textContent = originalText;
+                saveBtn.style.background = '';
+                saveBtn.style.display = 'none';
+            }, 2000);
+        })
+        .catch(error => {
+            alert('Error saving data: ' + error.message);
+        });
 }
 
 // SHOW WEEKLY SUMMARY
@@ -245,7 +369,7 @@ function showWeeklySummary() {
     let summaryHTML = `
         <div style="background: ${phase.color}; color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
             <h3>${phase.name} Phase</h3>
-            <p>Week ${currentWeek} of 12 | Days Tracked: 7</p>
+            <p>Week ${currentWeek} of 12 | Days Completed: 7</p>
         </div>
 
         <h4>Weekly Tracking Summary</h4>
@@ -254,7 +378,7 @@ function showWeeklySummary() {
                 <tr>
                     <th>Day</th>
                     <th>Status</th>
-                    <th>Key Focus</th>
+                    <th>Data Saved</th>
                 </tr>
             </thead>
             <tbody>
@@ -262,14 +386,15 @@ function showWeeklySummary() {
 
     for (let day = 1; day <= 7; day++) {
         const dayData = trackerData[currentWeek][day];
-        const status = dayData.dailyStatus || 'Not tracked';
+        const status = dayData.dailyStatus || 'Not set';
         const statusClass = `status-${status}`;
+        const dataCount = Object.keys(dayData).length;
 
         summaryHTML += `
             <tr>
-                <td>Day ${day}</td>
+                <td><strong>Day ${day}</strong></td>
                 <td><span class="status-badge ${statusClass}">${status.toUpperCase()}</span></td>
-                <td>${dayData.reflection1 ? dayData.reflection1.substring(0, 40) + '...' : 'No data'}</td>
+                <td>${dataCount} fields saved</td>
             </tr>
         `;
     }
@@ -278,17 +403,17 @@ function showWeeklySummary() {
             </tbody>
         </table>
 
-        <h4 style="margin-top: 20px;">Metrics This Week</h4>
-        <p><strong>Challenges:</strong> This week focused on <strong>${WEEK_FOCUS[currentWeek]}</strong></p>
-        <p><strong>Goal:</strong> Build consistency and internalize this habit</p>
+        <h4 style="margin-top: 20px;">Week Focus</h4>
+        <p><strong>${WEEK_FOCUS[currentWeek]}</strong></p>
+        <p style="color: #666; font-size: 13px;">This week, focus on building this habit consistently across all 7 days.</p>
 
-        <div style="background: #f0f0f0; padding: 15px; border-radius: 8px; margin-top: 15px;">
-            <h5>🎯 Next Steps</h5>
-            <ul>
-                <li>Review your daily reflections above</li>
-                <li>Identify patterns and obstacles</li>
-                <li>Progress to next week to layer in new challenges</li>
-                <li>Download your progress regularly</li>
+        <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-top: 15px;">
+            <h5>💡 Tips</h5>
+            <ul style="margin: 10px 0; padding-left: 20px; font-size: 13px;">
+                <li>Click "Save Day Data" after filling each day</li>
+                <li>Data automatically saves to your browser</li>
+                <li>Download backup regularly for safety</li>
+                <li>Progress to next week when ready</li>
             </ul>
         </div>
     `;
@@ -297,7 +422,7 @@ function showWeeklySummary() {
     modal.style.display = 'block';
 }
 
-// DOWNLOAD PROGRESS
+// DOWNLOAD PROGRESS (as JSON backup)
 function downloadProgress() {
     const data = {
         exportDate: new Date().toISOString(),
@@ -317,11 +442,10 @@ function downloadProgress() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    alert('✅ Progress downloaded successfully!');
-    updateLastUpdated();
+    alert('✓ Backup downloaded successfully!');
 }
 
-// UPLOAD PROGRESS
+// UPLOAD PROGRESS (restore from JSON)
 function uploadProgress(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -331,16 +455,22 @@ function uploadProgress(e) {
         try {
             const data = JSON.parse(event.target.result);
             trackerData = data.weeks;
-            updateLastUpdated();
-            alert('✅ Progress restored successfully!');
-            console.log('Loaded weeks with data');
+
+            // Save to IndexedDB
+            saveToIndexedDB(trackerData)
+                .then(() => {
+                    alert('✓ Backup restored successfully!');
+                    console.log('Data restored from backup');
+                })
+                .catch(error => {
+                    alert('Error saving restored data: ' + error.message);
+                });
         } catch (error) {
-            alert('❌ Invalid file format. Please select a valid downloaded progress file.');
+            alert('✗ Invalid backup file. Please select a valid downloaded progress file.');
         }
     };
     reader.readAsText(file);
 
-    // Reset input
     document.getElementById('fileInput').value = '';
 }
 
